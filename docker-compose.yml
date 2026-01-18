@@ -8,13 +8,13 @@ services:
   postgres-user-dev:
     image: postgres:15-alpine
     ports:
-    - "5432:5432"
+      - "5432:5432"
     container_name: postgres-user-dev
 
     environment:
       POSTGRES_DB: userdb
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres-user-dev-data:/var/lib/postgresql/data
     networks:
@@ -30,12 +30,12 @@ services:
   postgres-product-dev:
     image: postgres:15-alpine
     ports:
-    - "5433:5432"
+      - "5433:5432"
     container_name: postgres-product-dev
     environment:
       POSTGRES_DB: productdb
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres-product-dev-data:/var/lib/postgresql/data
     networks:
@@ -51,12 +51,12 @@ services:
   postgres-order-dev:
     image: postgres:15-alpine
     ports:
-    - "5434:5432"
+      - "5434:5432"
     container_name: postgres-order-dev
     environment:
       POSTGRES_DB: orderdb
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres-order-dev-data:/var/lib/postgresql/data
     networks:
@@ -76,8 +76,8 @@ services:
     container_name: postgres-auth-dev
     environment:
       POSTGRES_DB: auth_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres-auth-dev-data:/var/lib/postgresql/data
     networks:
@@ -105,8 +105,8 @@ services:
       - SPRING_PROFILES_ACTIVE=dev
       - SPRING_APPLICATION_NAME=user-service
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-user-dev:5432/userdb
-      - SPRING_DATASOURCE_USERNAME=postgres
-      - SPRING_DATASOURCE_PASSWORD=postgres
+      - SPRING_DATASOURCE_USERNAME=${DB_USER}
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
     depends_on:
       postgres-user-dev:
         condition: service_healthy
@@ -127,8 +127,8 @@ services:
       - SPRING_PROFILES_ACTIVE=dev
       - SPRING_APPLICATION_NAME=product-service
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-product-dev:5432/productdb
-      - SPRING_DATASOURCE_USERNAME=postgres
-      - SPRING_DATASOURCE_PASSWORD=postgres
+      - SPRING_DATASOURCE_USERNAME=${DB_USER}
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
         # URLs para comunicación entre MS
       - USER_SERVICE_URL=http://user-service-dev:8081
     depends_on:
@@ -153,8 +153,8 @@ services:
       - SPRING_PROFILES_ACTIVE=dev
       - SPRING_APPLICATION_NAME=order-service
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-order-dev:5432/orderdb
-      - SPRING_DATASOURCE_USERNAME=postgres
-      - SPRING_DATASOURCE_PASSWORD=postgres
+      - SPRING_DATASOURCE_USERNAME=${DB_USER}
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
       # URLs para comunicación entre MS
       - USER_SERVICE_URL=http://user-service-dev:8081
       - PRODUCT_SERVICE_URL=http://product-service-dev:8082
@@ -173,7 +173,7 @@ services:
   auth-service-dev:
     image: francoqueirolo/auth-service:1.0.0-dev
     build:
-      context: ../auth-service # Ajusta si el nombre de tu carpeta es distinto
+      context: ../auth-service
       dockerfile: Dockerfile
     container_name: auth-service-dev
     ports:
@@ -182,16 +182,60 @@ services:
       - SPRING_PROFILES_ACTIVE=dev
       - SPRING_APPLICATION_NAME=auth-service
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-auth-dev:5432/auth_db
-      - SPRING_DATASOURCE_USERNAME=postgres
-      - SPRING_DATASOURCE_PASSWORD=postgres
-      - JWT_SECRET=5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437
-      - JWT_EXPIRATION=3600000
+      - SPRING_DATASOURCE_USERNAME=${DB_USER}
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRATION=${JWT_EXPIRATION}
     depends_on:
       postgres-auth-dev:
         condition: service_healthy
     networks:
       - microservice-network
     restart: unless-stopped
+
+  # Config Server
+  config-server-dev:
+    image: francoqueirolo/config-server:1.0.0-dev
+    build:
+      context: ../config-server # Ajusta la ruta a tu carpeta
+      dockerfile: Dockerfile
+    container_name: config-server-dev
+    ports:
+      - "8084:8084"
+    environment:
+      - SPRING_PROFILES_ACTIVE=git
+      - SPRING_CLOUD_CONFIG_SERVER_GIT_URI=https://github.com/fqc-ecommerce/config-repo
+      - SPRING_CLOUD_CONFIG_SERVER_GIT_SEARCH_PATHS={application} # Esto le dice que busque por nombre de app
+      - SPRING_CLOUD_CONFIG_SERVER_GIT_DEFAULT_LABEL=main
+    networks:
+      - microservice-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f --user admin:admin http://localhost:8084/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Gateway
+  api-gateway-dev:
+    image: francoqueirolo/api-gateway:1.0.0-dev
+    build:
+      context: ../api-gateway # Ajusta la ruta a tu carpeta
+      dockerfile: Dockerfile
+    container_name: api-gateway-dev
+    ports:
+      - "8080:8080"
+    # En tu docker-compose.yml, dentro de api-gateway-dev:
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_CLOUD_CONFIG_URI=http://admin:admin@config-server-dev:8084
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://admin:admin@config-server-dev:8084
+    depends_on:
+      config-server-dev:
+        condition: service_healthy
+      auth-service-dev:
+        condition: service_started
+    networks:
+      - microservice-network
 
 # REDES Y VOLÚMENES
 # ==========================================================
